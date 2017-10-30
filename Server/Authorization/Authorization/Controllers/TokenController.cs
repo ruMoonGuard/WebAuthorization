@@ -1,64 +1,83 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Authorization.Models;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using SignInResult = Microsoft.AspNetCore.Identity.SignInResult;
+using Microsoft.IdentityModel.Tokens;
+using Newtonsoft.Json;
+using System.Linq;
 
 namespace Authorization.Controllers
 {
-    [Route("/token")]
+    [Route("api/token")]
     public class TokenController : Controller
     {
         private readonly UserManager<User> _userManager;
-        private readonly SignInManager<User> _signInManager;
 
-        public TokenController(UserManager<User> userManager, SignInManager<User> signInManager)
-        {
-            _userManager = userManager;
-            _signInManager = signInManager;
-        }
+        public TokenController(UserManager<User> userManager) => _userManager = userManager;
         
-        [HttpPost]
-        public IActionResult Create(string username, string password)
+        [HttpPost, Route("create")]
+        public async Task Create(string username, string password)
         {
-/*            if (IsValidUserAndPasswordCombination(username, password))
-                return new ObjectResult(GenerateToken(username));*/
-            return BadRequest();
-        }
-        
-        private string GenerateToken(string username)
-        {
-            var claims = new Claim[]
+            var identity = GetIdentity(username, password).Result;
+            
+            if (identity == null)
             {
-                new Claim(ClaimTypes.Name, username),
-                new Claim(JwtRegisteredClaimNames.Nbf, new DateTimeOffset(DateTime.Now).ToUnixTimeSeconds().ToString()),
-                new Claim(JwtRegisteredClaimNames.Exp, new DateTimeOffset(DateTime.Now.AddDays(1)).ToUnixTimeSeconds().ToString()),
-            };
-
+                //to do error
+            }
+            
             var nowTime = DateTime.UtcNow;
             
             var token = new JwtSecurityToken(
                 issuer: AuthOptions.ISSUER,
                 audience: AuthOptions.AUDIENCE,
-                notBefore: nowTime
-                
-                );
-
-            return new JwtSecurityTokenHandler().WriteToken(token);
+                notBefore: nowTime,
+                claims: identity.Claims,
+                expires: nowTime.Add(TimeSpan.FromMinutes(AuthOptions.LIFETIME)),
+                signingCredentials: new SigningCredentials(AuthOptions.GetSymmetricSecurityKey(),
+                    SecurityAlgorithms.HmacSha256)
+            );
+            
+            var encodedJwt = new JwtSecurityTokenHandler().WriteToken(token);
+            
+            var response = new
+            {
+                access_token = encodedJwt,
+                username = identity.Name
+            };
+            
+            Response.ContentType = "application/json";
+            await Response.WriteAsync(JsonConvert.SerializeObject(response,
+                new JsonSerializerSettings { Formatting = Formatting.Indented }));
         }
 
         private async Task<ClaimsIdentity> GetIdentity(string username, string password)
         {
             var user = await _userManager.FindByNameAsync(username);
 
-            if(user != null && await _userManager.CheckPasswordAsync(user, password))
-            {
-                // user is valid do whatever you want
-            }
+            var users = _userManager.Users.ToList();
+
+            if (user == null || !await _userManager.CheckPasswordAsync(user, password)) return null;
             
+            var claims = new List<Claim>
+            {
+                new Claim(ClaimsIdentity.DefaultNameClaimType, user.Email),
+                new Claim(JwtRegisteredClaimNames.Email, user.Email),
+                new Claim(JwtRegisteredClaimNames.Nbf, 
+                    new DateTimeOffset(DateTime.Now).ToUnixTimeSeconds().ToString()),
+                new Claim(JwtRegisteredClaimNames.Exp, 
+                    new DateTimeOffset(DateTime.Now.AddDays(1)).ToUnixTimeSeconds().ToString())
+            };
+                
+            var claimsIdentity =
+                new ClaimsIdentity(claims, "Token", ClaimsIdentity.DefaultNameClaimType,
+                    ClaimsIdentity.DefaultRoleClaimType);
+
+            return claimsIdentity;
         }
     }
 }

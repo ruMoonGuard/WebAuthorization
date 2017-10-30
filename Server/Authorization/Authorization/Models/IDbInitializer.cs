@@ -31,16 +31,22 @@ namespace Authorization.Models
             _context.Database.EnsureCreated();
 
             //If there is already an Administrator role, abort
-            if (_context.Roles.Any(r => r.Name == "Administrator")) return;
-
-            //Create the Administartor Role
-            await _roleManager.CreateAsync(new IdentityRole("Administrator"));
+            if (!_context.Roles.Any(r => r.Name == "Administrator"))
+            {
+                await _roleManager.CreateAsync(new IdentityRole("Administrator"));
+            }
 
             //Create the default Admin account and apply the Administrator role
-            string user = "test@test.com";
-            string password = "test0";
-            await _userManager.CreateAsync(new User { UserName = user, Email = user, EmailConfirmed = true}, password);
-            await _userManager.AddToRoleAsync(await _userManager.FindByNameAsync(user), "Administrator");
+            var user = "test@test.com";
+            var password = "Test_0";
+
+            if (!_context.Users.Any(x => x.Email.Equals(user)))
+            {
+                var x = await _userManager.CreateAsync(new User { UserName = user, Email = user, EmailConfirmed = true }, password);
+                await _userManager.AddToRoleAsync(await _userManager.FindByNameAsync(user), "Administrator");
+            }
+
+
         }
     }
 }
